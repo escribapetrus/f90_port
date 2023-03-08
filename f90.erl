@@ -18,21 +18,21 @@ call(X) ->
 %% callbacks
 init(Filename) ->
     process_flag(trap_exit, true),
-    Port = open_port({spawn, Filename}, [{packet, 2}, binary]),
+    Port = open_port({spawn, Filename}, [binary, out]),
     {ok, {port, Port}}.
 
 handle_call({call, X}, _From, {port, Port} = State) ->
     port_command(Port, list_to_binary(X)),
-    receive
-	{Port, {data, Data}} ->
-	    {reply, Data, State}
-	end.
+    {reply, ok, State}.
+    %% receive
+    %% 	{_, {data, Data}} ->
+    %% 	end.
     
 handle_cast(stop, {port, Port}) ->
     port_close(Port),
     {stop, normal, []}.
 
-handle_info({Port, {data, Data}}, {port, Port} = State) ->
+handle_info({_, {data, Data}}, {port, _} = State) ->
     io:format("received: ~p~n", [Data]),
     {noreply, State};
 
