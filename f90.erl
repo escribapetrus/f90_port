@@ -3,6 +3,7 @@
 
 -export([start_link/1, start_link/0, stop/0, call/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([accel/1, mass/1]).
 
 start_link() -> start_link("./makoto").
 
@@ -12,21 +13,24 @@ start_link(Filename) ->
 stop() ->
     gen_server:cast(?MODULE, stop).
 
+accel(X) -> call("accel " ++ integer_to_list(X) ++ "\n").
+mass(X) -> call("mass " ++ integer_to_list(X) ++ "\n").
+
 call(X) ->
     gen_server:call(?MODULE, {call, X}).
 
 %% callbacks
 init(Filename) ->
     process_flag(trap_exit, true),
-    Port = open_port({spawn, Filename}, [binary, out]),
+    Port = open_port({spawn, Filename}, [use_stdio, exit_status]),
     {ok, {port, Port}}.
 
 handle_call({call, X}, _From, {port, Port} = State) ->
     port_command(Port, list_to_binary(X)),
-    {reply, ok, State}.
-    %% receive
-    %% 	{_, {data, Data}} ->
-    %% 	end.
+    receive
+	{_, {data, Data}} ->
+	    {reply, Data, State}
+	end.
     
 handle_cast(stop, {port, Port}) ->
     port_close(Port),
