@@ -1,11 +1,16 @@
 build:
-	gfortran *.f90 -o makoto
+	gfortran *.f90 -o newton
 	erlc *.erl
 
-run:
-	gfortran *.f90 -o makoto
+run-erl:
+	gfortran *.f90 -o newton
 	erlc *.erl
 	erl
 
+run-f90:
+	gfortran *.f90 -o newton
+	erlc *.erl
+	./newton
+
 clean:
-	rm makoto *.beam 
+	rm newton *.beam 

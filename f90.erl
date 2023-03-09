@@ -1,11 +1,8 @@
 -module(f90).
 -behaviour(gen_server).
 
--export([start_link/1, start_link/0, stop/0, call/1]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
--export([accel/1, mass/1]).
-
-start_link() -> start_link("./makoto").
+-export([start_link/1, force/2, stop/0]).
+-export([init/1, handle_call/3, handle_cast/2]).
 
 start_link(Filename) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Filename, []).
@@ -13,40 +10,33 @@ start_link(Filename) ->
 stop() ->
     gen_server:cast(?MODULE, stop).
 
-accel(X) -> call("accel " ++ integer_to_list(X) ++ "\n").
-mass(X) -> call("mass " ++ integer_to_list(X) ++ "\n").
+force(Mass, Accel) ->
+    gen_server:call(?MODULE, {force, Mass, Accel}).
 
-call(X) ->
-    gen_server:call(?MODULE, {call, X}).
-
-%% callbacks
 init(Filename) ->
     process_flag(trap_exit, true),
     Port = open_port({spawn, Filename}, [use_stdio, exit_status]),
     {ok, {port, Port}}.
-
-handle_call({call, X}, _From, {port, Port} = State) ->
-    port_command(Port, list_to_binary(X)),
-    receive
-	{_, {data, Data}} ->
-	    {reply, Data, State}
-	end.
+    
+handle_call({force, Mass, Accel}, _From, {port, Port} = State) ->
+    call_port(mass(Mass), Port),
+    call_port(accel(Accel), Port),
+    Res = call_port(result(), Port),
+    {reply, Res, State}.
     
 handle_cast(stop, {port, Port}) ->
     port_close(Port),
     {stop, normal, []}.
 
-handle_info({_, {data, Data}}, {port, _} = State) ->
-    io:format("received: ~p~n", [Data]),
-    {noreply, State};
+call_port(X, Port) ->
+    port_command(Port, list_to_binary(X)),
+    receive
+	{_, {data, Data}} ->
+	    TrimmedData = string:trim(Data),
+	    list_to_integer(TrimmedData)
+    after 500 -> nil
+    end.
 
-handle_info({'EXIT', _Port, Reason}, _State) ->
-    io:format("exit: reason ~p~n", [Reason]),
-    {stop, Reason, undefined};
-
-handle_info(Msg, State) ->
-    erlang:display(Msg),
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
+accel(X) -> "accel " ++ integer_to_list(X) ++ "\n".
+mass(X) -> "mass " ++ integer_to_list(X) ++ "\n".
+result() -> "return\n".
