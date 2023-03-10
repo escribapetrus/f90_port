@@ -1,0 +1,278 @@
+* Transparent execution of Fortran code from the Erlang machine using ports
+
+Joe Armstrong, creator of the Erlang programming language, said a couple of times that,
+though the Erlang system is the perfect tool for writing programs designed for concurrent execution,
+it is not the best tool for compute-intensive tasks, such as numerical calculations. Those tasks, he said,
+would be best served by calling an external program written in Fortran.
+
+The problem, however, is that he never told us how to run such a program from inside the Erlang machine.
+
+** The plan
+
+We are going to write a Fortran program that receives input and does some calculations with the values
+provided by the user. Because our problem here is not how to write Fortran, but rather how to run the
+program from inside the Erlang runtime, a simple program will do just fine. For this exercise, we write
+a program that calculates the force according to Newton's 2nd law.
+
+In order to interface with the Fortran program, we use a genserver process that manages an Erlang port.
+Ports are Erlang processes that allow running external programs and interact with them in the same way
+we interact with process in the Erlang machine, by sending and receiving messages.
+
+Our objective is to call the genserver API in Erlang, have the function transparently execute in the
+Fortran program (that is, as if it had been called locally) and return the correct result.
+
+#+BEGIN_SRC erlang
+Eshell V13.1.2  (abort with ^G)
+1> f90:start_link("./newton").
+{ok,<0.84.0>}
+2> f90:force(90,80).
+7200  
+#+END_SRC
+
+** The Fortran program
+
+First, we focus on the Fortran program that will effectively perform the calculations.
+As we said, we are going to calculate the force using newton's formula, which is, as we all know,
+defined as: f = m * a.
+
+Let's start with the simplest program possible:
+
+#+BEGIN_SRC f90
+! newton0.f90
+program newton
+  implicit none
+  integer mass, accel
+
+  mass = 90
+  accel = 80
+  
+  write (*,'(10i0)') force(mass, accel)
+
+contains
+  function force(m, a) result (f)
+    implicit none
+    integer m, a, f
+
+    f = m * a
+  end function force
+end program newton
+#+END_SRC
+
+The program consists of a simple function definition for the newtonian formula, a couple of variable
+declarations and assignments, and a write statement that prints the result of applying the function
+on the variables as arguments.
+
+We compile the program with "gfortran newton0.f90 -o newton". Running it in the terminal produces
+the correct result.
+
+For the next step, we need to process user input:
+
+#+BEGIN_SRC f90
+! newton.f90
+program newton
+
+  implicit none
+  integer rstat
+  integer mass, accel
+  character(20) :: input
+
+  do while(.true.)
+     do while(.true.)
+        read(*,'(A)',iostat=rstat) input
+
+        if (rstat /= 0) then
+           stop
+        else
+           if (input(1:4) == 'mass') then
+              call maybe_read_int(mass, 4 + 2) 
+           else if (input(1:5) == 'accel') then
+              call maybe_read_int(accel, 5 + 2)
+           else if (input(1:6) == 'return') then
+              exit
+           else
+              write(*,*) 'bad input' 
+           end if
+        end if
+     end do
+
+     write (*,'(10i0)') force(mass, accel)
+
+     mass = 0
+     accel = 0
+  end do
+
+contains
+  subroutine maybe_read_int(field, index)
+    implicit none
+    integer field, index
+
+    read(input(index:), *, iostat=rstat) field
+    if (rstat == 0) then
+       write(*,'(10i0)') field
+    else
+       write(*,*) 'bad input'
+    endif
+  end subroutine maybe_read_int
+
+  function force(m, a) result (f)
+    implicit none
+    integer m, a, f
+
+    f = m * a
+  end function force
+end program newton
+#+END_SRC
+
+The program starts with a loop, which reads the standard input and assigns its value to a string.
+The input is matched to the expected patterns:
+
+- mass [value]: stores the value in the mass variable
+- accel [value]: stores the value in the accel variable
+- return: exits the loop and proceeds to the next step
+
+Next, the program prints the result of the force function over the variables, just like in the
+previous snippet. Let's compile the program and run it in the terminal to see it in action.
+
+ #+BEGIN_SRC
+> ./newton
+> mass 90
+90
+> accel 80
+80
+> return
+7200
+#+END_SRC
+
+Great, we have successfully written a Fortran program that calculates the force using the newtonian formula.
+Now, we need to write an Erlang program that is able to run it.
+
+** The Erlang program
+
+As we said, we want to be able to call an Erlang function that produces the result from
+the fortran program's execution. The appropriate way to do this in Erlang is using ports.
+Acording to the documentation:
+
+#+BEGIN_QUOTE
+Ports provide the basic mechanism for communication with the external world, from Erlang's point of view.
+The ports provide a byte-oriented interface to an external program. When a port is created,
+Erlang can communicate with it by sending and receiving lists of bytes (not Erlang terms).
+This means that the programmer might have to invent a suitable encoding and decoding scheme.
+
+When to use: Ports can be used for all kinds of interoperability situations where the Erlang program
+and the other program runs on the same machine. Programming is fairly straight-forward.
+#+END_QUOTE
+
+Most things in the Erlang system are processes, and ports are no exception. A port is a processes that
+sends and receives messages from other processes in the Erlang runtime, and sends and receives messages
+from the external program.
+
+One key difference with message passing from ports to the external program, compared with message passing
+between processes inside the Erlang runtime, is that internal processes understand erlang terms
+(e.g. atoms, tuples, records, maps), while the external program absolutely does not. Everything we can do
+is send and receive binaries.
+
+This is very similar to what happens in distributed architecture of microservices implemented in different
+programming languages. For example, three services running Node, JVM, and Python cannot share objects native
+to their respective languages. They must instead resort to a common binary (string) protocol (e.g. JSON) for
+the API, and implement encoding/decoding internally.
+
+Luckily for us, our Fortran program is designed to expect very simple binary patterns. Let's see how we
+create a port and send and receive messages.
+
+#+BEGIN_SRC erlang
+Eshell V13.1.2  (abort with ^G)
+1> Port = open_port({spawn, "./newton"}, [use_stdio, exit_status]). 
+#Port<0.5>
+2> Port ! {self(), {command, "mass 90\n"}}.
+{<0.82.0>,{command,"mass 90\n"}}
+3> flush().
+Shell got {#Port<0.5>,{data,"90\n"}}
+ok
+4> Port ! {self(), {command, "accel 90\n"}}.
+{<0.82.0>,{command,"accel 90\n"}}
+5> flush().
+Shell got {#Port<0.5>,{data,"90\n"}}
+ok
+6> Port ! {self(), {command, "return\n"}}.  
+{<0.82.0>,{command,"return\n"}}
+6> flush().
+Shell got {#Port<0.5>,{data,"8100\n"}}
+ok
+#+END_SRC
+
+We create a port with the erlang library function open_port/2, which receives the command to the external
+program and some options, and returns the port Pid. We use the Pid to send messages to the port, which
+it will relay to the external program using the stdin.
+
+Here, we are creating a port to the fortran program "./newton", and sending it three messages. The flush()
+call reads the messages received by the Erlang shell process. Notice the third message: it is the result
+of the force() function, executed by the Fortran program!
+
+We are very close to wrapping this up. All that is left is to put this functionality in a genserver that
+manages the port and provides a clear interface in accordance with the OTP standards.
+
+#+BEGIN_SRC erlang
+-module(f90).
+-behaviour(gen_server).
+
+-export([start_link/1, force/2, stop/0]).
+-export([init/1, handle_call/3, handle_cast/2]).
+
+%% API
+start_link(Filename) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Filename, []).
+
+stop() ->
+    gen_server:cast(?MODULE, stop).
+
+force(Mass, Accel) ->
+    gen_server:call(?MODULE, {force, Mass, Accel}).
+
+%% callbacks
+init(Filename) ->
+    process_flag(trap_exit, true),
+    Port = open_port({spawn, Filename}, [use_stdio, exit_status]),
+    {ok, {port, Port}}.
+    
+handle_call({force, Mass, Accel}, _From, {port, Port} = State) ->
+    call_port(mass(Mass), Port),
+    call_port(accel(Accel), Port),
+    Res = call_port(result(), Port),
+    {reply, Res, State}.
+    
+handle_cast(stop, {port, Port}) ->
+    port_close(Port),
+    {stop, normal, []}.
+
+call_port(X, Port) ->
+    port_command(Port, X),
+    receive
+	{_, {data, Data}} ->
+	    TrimmedData = string:trim(Data),
+	    list_to_integer(TrimmedData)
+    after 500 -> nil
+    end.
+
+accel(X) -> "accel " ++ integer_to_list(X) ++ "\n".
+mass(X) -> "mass " ++ integer_to_list(X) ++ "\n".
+result() -> "return\n".
+#+END_SRC
+
+We start the genserver with start_link/1 by providing the external program command as argument.
+The init/1 function runs as a callback, spawns the port, and stores the port Pid in the genserver state.
+
+The force/2 function takes two integers, mass and acceleration, and will callback a handler that
+sends messages to the port and receives the response from the external program.
+
+With this, we have implemented exactly the functionality we wanted in the beginning: a server that provides
+a simple Erlang function that produces the result of a calculation done in an external Fortran program.
+
+** Conclusion
+
+The computer is an awesome machine, and it provides so many different tools and patterns with which
+we can create programs. It is a waste of intelligence to be confined to a single programming language.
+
+In this exercise, we showed that with a simple construct, the Erlang port, we can interface with external
+programs in other languages. Once we set up a common binary protocol between the two programs, we can
+send and receive messages just like we do inside the Erlang machine, requesting execution and getting
+back results.

@@ -1,7 +1,7 @@
 program newton
   implicit none
   integer rstat
-  integer force, mass, accel
+  integer mass, accel
   character(20) :: input
 
   do while(.true.)
@@ -9,7 +9,6 @@ program newton
         read(*,'(A)',iostat=rstat) input
 
         if (rstat /= 0) then
-           write(*,*) 'fortran: io error'
            stop
         else
            if (input(1:4) == 'mass') then
@@ -24,10 +23,8 @@ program newton
         end if
      end do
 
-     force = mass * accel
-     write (*,'(10i0)') force
+     write (*,'(10i0)') force(mass, accel)
 
-     force = 0
      mass = 0
      accel = 0
   end do
@@ -44,5 +41,12 @@ contains
        write(*,*) 'bad input'
     endif
   end subroutine maybe_read_int
+
+  function force(m, a) result (f)
+    implicit none
+    integer m, a, f
+
+    f = m * a
+  end function force
 end program newton
 

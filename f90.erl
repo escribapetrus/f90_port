@@ -29,7 +29,7 @@ handle_cast(stop, {port, Port}) ->
     {stop, normal, []}.
 
 call_port(X, Port) ->
-    port_command(Port, list_to_binary(X)),
+    port_command(Port, X),
     receive
 	{_, {data, Data}} ->
 	    TrimmedData = string:trim(Data),
