@@ -37,7 +37,7 @@ defined as: f = m * a.
 
 Let's start with the simplest program possible:
 
-#+BEGIN_SRC f90
+#+BEGIN_SRC fortran
 ! newton0.f90
 program newton
   implicit none
@@ -58,6 +58,9 @@ contains
 end program newton
 #+END_SRC
 
+#+RESULTS:
+: 7200
+
 The program consists of a simple function definition for the newtonian formula, a couple of variable
 declarations and assignments, and a write statement that prints the result of applying the function
 on the variables as arguments.
@@ -67,10 +70,9 @@ the correct result.
 
 For the next step, we need to process user input:
 
-#+BEGIN_SRC f90
+#+BEGIN_SRC fortran :stdin t
 ! newton.f90
 program newton
-
   implicit none
   integer rstat
   integer mass, accel
@@ -122,6 +124,8 @@ contains
   end function force
 end program newton
 #+END_SRC
+
+#+RESULTS:
 
 The program starts with a loop, which reads the standard input and assigns its value to a string.
 The input is matched to the expected patterns:
@@ -276,3 +280,4 @@ In this exercise, we showed that with a simple construct, the Erlang port, we ca
 programs in other languages. Once we set up a common binary protocol between the two programs, we can
 send and receive messages just like we do inside the Erlang machine, requesting execution and getting
 back results.
+
